@@ -1,1 +1,31 @@
-{"scripts":{"dev":"vite","build":"vite build","preview":"vite preview"},"dependencies":{"@vitejs/plugin-react":"latest","vite":"latest","react":"latest","react-dom":"latest","lucide-react":"latest"},"devDependencies":{"typescript":"latest","eslint":"latest","@types/react":"latest","@types/react-dom":"latest"}}
+{
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "service:build": "npm run build",
+    "service:start": "npm run service:build && pm2 start ecosystem.config.cjs",
+    "service:stop": "pm2 stop mini-tools",
+    "service:restart": "npm run service:build && pm2 restart mini-tools || pm2 start ecosystem.config.cjs",
+    "service:delete": "pm2 delete mini-tools",
+    "service:status": "pm2 status mini-tools",
+    "service:logs": "pm2 logs mini-tools",
+    "service:save": "pm2 save",
+    "service:startup": "pm2 startup"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "eslint": "latest",
+    "pm2": "^7.0.1",
+    "serve": "^14.2.6",
+    "typescript": "latest"
+  }
+}
