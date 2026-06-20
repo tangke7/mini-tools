@@ -1,10 +1,14 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { Braces, CheckCircle2, ChevronDown, ChevronRight, Clipboard, Code2, Database, Download, FileJson2, LayoutGrid, Minimize2, PencilRuler, Settings, Sparkles, XCircle } from 'lucide-react';
+import { Braces, CalendarClock, CheckCircle2, ChevronDown, ChevronRight, Clock, Clipboard, Code2, Database, Download, FileDiff, FileJson2, LayoutGrid, Minimize2, PencilRuler, Regex, Settings, Sparkles, XCircle } from 'lucide-react';
 import { formatSQL, defaultOptions as defaultSqlOptions } from './sqlFormatter';
 import AlterBuilder from './tools/alter/AlterBuilder';
+import CronParser from './tools/cron-parser/CronParser';
 import DdlBuilder from './tools/ddl/DdlBuilder';
+import RegexTester from './tools/regex-tester/RegexTester';
 import TemplateLibrary from './tools/templates/TemplateLibrary';
+import TextDiffTool from './tools/text-diff/TextDiffTool';
+import TimeConverter from './tools/time-converter/TimeConverter';
 import TypeConverter from './tools/type-converter/TypeConverter';
 import './styles.css';
 
@@ -47,6 +51,16 @@ const TOOL_GROUPS = [
       { id: 'alter', name: 'ALTER 生成器', shortName: 'ALTER', description: '生成字段、分区、表属性变更语句', icon: PencilRuler },
       { id: 'type-converter', name: '类型转换器', shortName: 'TYPE', description: 'Hive 与 ClickHouse 字段类型互转', icon: Code2 },
       { id: 'templates', name: '建表模板库', shortName: 'TPL', description: '常用 Hive、Iceberg、ClickHouse 建表模板', icon: Database },
+    ],
+  },
+  {
+    id: 'utility',
+    name: '开发提效',
+    tools: [
+      { id: 'text-diff', name: '文本 Diff 工具', shortName: 'DIFF', description: '对比两段文本、SQL、JSON 并生成行级差异', icon: FileDiff },
+      { id: 'regex-tester', name: '正则测试器', shortName: 'REGEX', description: '测试正则匹配、高亮结果并查看捕获组', icon: Regex },
+      { id: 'time-converter', name: '时间转换工具', shortName: 'TIME', description: '时间戳、日期格式和分区条件快速转换', icon: Clock },
+      { id: 'cron-parser', name: 'Cron 表达式解析器', shortName: 'CRON', description: '解析 Linux / Quartz Cron 并预览最近执行时间', icon: CalendarClock },
     ],
   },
 ];
@@ -460,7 +474,17 @@ function App() {
           ? 'ALTER 实时生成'
           : activeTool === 'type-converter'
             ? '类型实时转换'
-            : '模板实时生成';
+            : activeTool === 'templates'
+              ? '模板实时生成'
+              : activeTool === 'text-diff'
+                ? '文本实时对比'
+                : activeTool === 'regex-tester'
+                  ? '正则实时匹配'
+                  : activeTool === 'time-converter'
+                    ? '时间实时转换'
+                    : activeTool === 'cron-parser'
+                      ? 'Cron 实时解析'
+                      : '工具就绪';
 
   const sqlStats = React.useMemo(() => ({
     size: sqlInput.length,
@@ -569,7 +593,7 @@ function App() {
       <div className="app-layout">
         <ToolSidebar activeTool={activeTool} onToolChange={setActiveTool} />
         <section className="tool-content" aria-label={currentTool.name}>
-          {activeTool === 'json' && (
+          <div className={`tool-pane ${activeTool === 'json' ? 'is-active' : 'is-hidden'}`} aria-hidden={activeTool !== 'json'}>
             <>
               <section className="workspace-grid json-workspace">
                 <article className="panel editor-panel">
@@ -609,9 +633,9 @@ function App() {
                 <span>{stats.nodes} 节点</span>
               </div>
             </>
-          )}
+          </div>
 
-          {activeTool === 'sql' && (
+          <div className={`tool-pane ${activeTool === 'sql' ? 'is-active' : 'is-hidden'}`} aria-hidden={activeTool !== 'sql'}>
             <>
               <section className="workspace-grid sql-workspace">
                 <article className="panel editor-panel">
@@ -643,12 +667,16 @@ function App() {
                 <span>{sqlStats.outputLines} 输出行</span>
               </div>
             </>
-          )}
+          </div>
 
-          {activeTool === 'ddl' && <DdlBuilder />}
-          {activeTool === 'alter' && <AlterBuilder />}
-          {activeTool === 'type-converter' && <TypeConverter />}
-          {activeTool === 'templates' && <TemplateLibrary />}
+          <div className={`tool-pane ${activeTool === 'ddl' ? 'is-active' : 'is-hidden'}`} aria-hidden={activeTool !== 'ddl'}><DdlBuilder /></div>
+          <div className={`tool-pane ${activeTool === 'alter' ? 'is-active' : 'is-hidden'}`} aria-hidden={activeTool !== 'alter'}><AlterBuilder /></div>
+          <div className={`tool-pane ${activeTool === 'type-converter' ? 'is-active' : 'is-hidden'}`} aria-hidden={activeTool !== 'type-converter'}><TypeConverter /></div>
+          <div className={`tool-pane ${activeTool === 'templates' ? 'is-active' : 'is-hidden'}`} aria-hidden={activeTool !== 'templates'}><TemplateLibrary /></div>
+          <div className={`tool-pane ${activeTool === 'text-diff' ? 'is-active' : 'is-hidden'}`} aria-hidden={activeTool !== 'text-diff'}><TextDiffTool /></div>
+          <div className={`tool-pane ${activeTool === 'regex-tester' ? 'is-active' : 'is-hidden'}`} aria-hidden={activeTool !== 'regex-tester'}><RegexTester /></div>
+          <div className={`tool-pane ${activeTool === 'time-converter' ? 'is-active' : 'is-hidden'}`} aria-hidden={activeTool !== 'time-converter'}><TimeConverter /></div>
+          <div className={`tool-pane ${activeTool === 'cron-parser' ? 'is-active' : 'is-hidden'}`} aria-hidden={activeTool !== 'cron-parser'}><CronParser /></div>
         </section>
       </div>
     </main>
