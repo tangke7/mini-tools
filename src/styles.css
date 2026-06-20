@@ -21,9 +21,6 @@ body,
 
 body {
   margin: 0;
-  min-width: 800px;
-  min-height: 600px;
-  overflow: auto;
   background: #11101c;
 }
 

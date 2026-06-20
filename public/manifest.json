@@ -3,9 +3,23 @@
   "name": "Mini Tools",
   "description": "JSON、SQL、DDL、Diff、正则、Cron、时间转换等常用开发提效工具。",
   "version": "1.0.0",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "action": {
-    "default_title": "Mini Tools",
-    "default_popup": "index.html"
+    "default_title": "打开 Mini Tools",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "background": {
+    "service_worker": "extension-background.js"
   },
   "permissions": [],
   "offline_enabled": true
