@@ -1,7 +1,11 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { CheckCircle2, ChevronDown, ChevronRight, Clipboard, Download, FileJson2, Minimize2, Settings, Sparkles, XCircle } from 'lucide-react';
+import { Braces, CheckCircle2, ChevronDown, ChevronRight, Clipboard, Code2, Database, Download, FileJson2, LayoutGrid, Minimize2, PencilRuler, Settings, Sparkles, XCircle } from 'lucide-react';
 import { formatSQL, defaultOptions as defaultSqlOptions } from './sqlFormatter';
+import AlterBuilder from './tools/alter/AlterBuilder';
+import DdlBuilder from './tools/ddl/DdlBuilder';
+import TemplateLibrary from './tools/templates/TemplateLibrary';
+import TypeConverter from './tools/type-converter/TypeConverter';
 import './styles.css';
 
 const SAMPLE_JSON = `{
@@ -26,10 +30,28 @@ const THEMES = [
   { id: 'light', name: '简约浅色', description: '浅色背景，适合白天使用' },
 ];
 
-const TOOL_OPTIONS = [
-  { id: 'json', name: 'JSON 解析工具', shortName: 'JSON' },
-  { id: 'sql', name: 'SQL 格式化工具', shortName: 'SQL' },
+const TOOL_GROUPS = [
+  {
+    id: 'formatter',
+    name: '格式化工具',
+    tools: [
+      { id: 'json', name: 'JSON 解析工具', shortName: 'JSON', description: '格式化、压缩、节点折叠与路径复制', icon: Braces },
+      { id: 'sql', name: 'SQL 格式化工具', shortName: 'SQL', description: '格式化长 SQL，支持关键字和逗号风格', icon: Code2 },
+    ],
+  },
+  {
+    id: 'data-dev',
+    name: '数据开发',
+    tools: [
+      { id: 'ddl', name: 'DDL 生成器', shortName: 'DDL', description: '快速生成 Hive、Iceberg、ClickHouse 建表语句', icon: Database },
+      { id: 'alter', name: 'ALTER 生成器', shortName: 'ALTER', description: '生成字段、分区、表属性变更语句', icon: PencilRuler },
+      { id: 'type-converter', name: '类型转换器', shortName: 'TYPE', description: 'Hive 与 ClickHouse 字段类型互转', icon: Code2 },
+      { id: 'templates', name: '建表模板库', shortName: 'TPL', description: '常用 Hive、Iceberg、ClickHouse 建表模板', icon: Database },
+    ],
+  },
 ];
+
+const TOOL_OPTIONS = TOOL_GROUPS.flatMap((group) => group.tools);
 
 function parseJson(input) {
   try {
@@ -373,22 +395,42 @@ function SqlSettings({ options, onOptionsChange }) {
   );
 }
 
-function ToolSwitcher({ activeTool, onToolChange }) {
+function ToolSidebar({ activeTool, onToolChange }) {
   return (
-    <div className="tool-switcher" role="tablist" aria-label="工具切换">
-      {TOOL_OPTIONS.map((tool) => (
-        <button
-          key={tool.id}
-          type="button"
-          role="tab"
-          className={activeTool === tool.id ? 'is-active' : ''}
-          aria-selected={activeTool === tool.id}
-          onClick={() => onToolChange(tool.id)}
-        >
-          {tool.shortName}
-        </button>
-      ))}
-    </div>
+    <aside className="tool-sidebar" aria-label="工具导航">
+      <div className="sidebar-title">
+        <LayoutGrid size={16} />
+        <span>工具导航</span>
+      </div>
+      <nav className="tool-nav">
+        {TOOL_GROUPS.map((group) => (
+          <section className="tool-group" key={group.id}>
+            <h2>{group.name}</h2>
+            <div className="tool-group-list">
+              {group.tools.map((tool) => {
+                const Icon = tool.icon;
+
+                return (
+                  <button
+                    key={tool.id}
+                    type="button"
+                    className={`tool-nav-item ${activeTool === tool.id ? 'is-active' : ''}`}
+                    onClick={() => onToolChange(tool.id)}
+                    aria-current={activeTool === tool.id ? 'page' : undefined}
+                  >
+                    <span className="tool-nav-icon"><Icon size={16} /></span>
+                    <span>
+                      <strong>{tool.name}</strong>
+                      <small>{tool.description}</small>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ))}
+      </nav>
+    </aside>
   );
 }
 
@@ -407,6 +449,18 @@ function App() {
   const minifiedJson = React.useMemo(() => parsed.error ? '' : JSON.stringify(parsed.value), [parsed]);
   const formattedSql = React.useMemo(() => formatSQL(sqlInput, sqlOptions), [sqlInput, sqlOptions]);
   const currentTool = TOOL_OPTIONS.find((tool) => tool.id === activeTool) ?? TOOL_OPTIONS[0];
+  const statusState = activeTool === 'json' && parsed.error ? 'error' : 'success';
+  const statusText = activeTool === 'json'
+    ? (parsed.error ? '解析失败' : 'JSON 有效')
+    : activeTool === 'sql'
+      ? 'SQL 可格式化'
+      : activeTool === 'ddl'
+        ? 'DDL 实时生成'
+        : activeTool === 'alter'
+          ? 'ALTER 实时生成'
+          : activeTool === 'type-converter'
+            ? '类型实时转换'
+            : '模板实时生成';
 
   const sqlStats = React.useMemo(() => ({
     size: sqlInput.length,
@@ -483,13 +537,14 @@ function App() {
       <header className="top-bar">
         <div className="brand">
           <span className="brand-icon"><FileJson2 size={18} /></span>
-          <span>{currentTool.name}</span>
-          <ToolSwitcher activeTool={activeTool} onToolChange={setActiveTool} />
+          <span>Mini Tools</span>
+          <span className="brand-divider" />
+          <span className="current-tool-name">{currentTool.name}</span>
         </div>
         <div className="top-actions">
-          <div className={`status-pill ${activeTool === 'json' && parsed.error ? 'error' : 'success'}`}>
-            {activeTool === 'json' && parsed.error ? <XCircle size={16} /> : <CheckCircle2 size={16} />}
-            {activeTool === 'json' ? (parsed.error ? '解析失败' : 'JSON 有效') : 'SQL 可格式化'}
+          <div className={`status-pill ${statusState}`}>
+            {statusState === 'error' ? <XCircle size={16} /> : <CheckCircle2 size={16} />}
+            {statusText}
           </div>
           <button
             type="button"
@@ -511,79 +566,91 @@ function App() {
         </div>
       </header>
 
-      {activeTool === 'json' ? (
-        <>
-          <section className="workspace-grid json-workspace">
-            <article className="panel editor-panel">
-              <div className="panel-header">
-                <h2>输入 JSON</h2>
-                <div className="panel-tools">
-                  <button onClick={() => setOutput(prettyJson)} disabled={Boolean(parsed.error)}><Sparkles size={15} />格式化</button>
-                  <button onClick={() => setOutput(minifiedJson)} disabled={Boolean(parsed.error)}><Minimize2 size={15} />压缩</button>
-                  <button onClick={copyResult} disabled={Boolean(parsed.error)}><Clipboard size={15} />{copyText}</button>
-                  <button onClick={downloadResult} disabled={Boolean(parsed.error)}><Download size={15} />下载</button>
-                  <button className="ghost" onClick={() => setInput(SAMPLE_JSON)}>示例</button>
-                  <button className="ghost danger" onClick={() => setInput('')}>清空</button>
-                </div>
-              </div>
-              <textarea value={input} onChange={(event) => setInput(event.target.value)} spellCheck="false" />
-              {parsed.error && <p className="error-message">{parsed.error}</p>}
-            </article>
+      <div className="app-layout">
+        <ToolSidebar activeTool={activeTool} onToolChange={setActiveTool} />
+        <section className="tool-content" aria-label={currentTool.name}>
+          {activeTool === 'json' && (
+            <>
+              <section className="workspace-grid json-workspace">
+                <article className="panel editor-panel">
+                  <div className="panel-header">
+                    <h2>输入 JSON</h2>
+                    <div className="panel-tools">
+                      <button onClick={() => setOutput(prettyJson)} disabled={Boolean(parsed.error)}><Sparkles size={15} />格式化</button>
+                      <button onClick={() => setOutput(minifiedJson)} disabled={Boolean(parsed.error)}><Minimize2 size={15} />压缩</button>
+                      <button onClick={copyResult} disabled={Boolean(parsed.error)}><Clipboard size={15} />{copyText}</button>
+                      <button onClick={downloadResult} disabled={Boolean(parsed.error)}><Download size={15} />下载</button>
+                      <button className="ghost" onClick={() => setInput(SAMPLE_JSON)}>示例</button>
+                      <button className="ghost danger" onClick={() => setInput('')}>清空</button>
+                    </div>
+                  </div>
+                  <textarea value={input} onChange={(event) => setInput(event.target.value)} spellCheck="false" />
+                  {parsed.error && <p className="error-message">{parsed.error}</p>}
+                </article>
 
-            <article className="panel output-panel">
-              <div className="panel-header">
-                <h2>格式化结果</h2>
-                <span>悬停节点 · 复制路径 / 复制值</span>
-              </div>
-              <div className="formatted-result">
-                {parsed.error ? (
-                  <p className="empty-result">请输入合法 JSON 后查看彩色格式化结果。</p>
-                ) : (
-                  <JsonSyntaxView data={parsed.value} copiedTarget={copiedTarget} onCopyNode={copyNode} />
-                )}
-              </div>
-            </article>
-          </section>
+                <article className="panel output-panel">
+                  <div className="panel-header">
+                    <h2>格式化结果</h2>
+                    <span>悬停节点 · 复制路径 / 复制值</span>
+                  </div>
+                  <div className="formatted-result">
+                    {parsed.error ? (
+                      <p className="empty-result">请输入合法 JSON 后查看彩色格式化结果。</p>
+                    ) : (
+                      <JsonSyntaxView data={parsed.value} copiedTarget={copiedTarget} onCopyNode={copyNode} />
+                    )}
+                  </div>
+                </article>
+              </section>
 
-          <div className="compact-stats" aria-label="JSON 统计信息">
-            <span>{stats.size} 字符</span>
-            <span>{stats.lines} 行</span>
-            <span>{stats.nodes} 节点</span>
-          </div>
-        </>
-      ) : (
-        <>
-          <section className="workspace-grid sql-workspace">
-            <article className="panel editor-panel">
-              <div className="panel-header">
-                <h2>输入 SQL</h2>
-                <div className="panel-tools">
-                  <button onClick={() => setSqlInput(formattedSql)} disabled={!formattedSql}><Sparkles size={15} />格式化</button>
-                  <button onClick={copySqlResult} disabled={!formattedSql}><Clipboard size={15} />{sqlCopyText}</button>
-                  <button onClick={downloadSqlResult} disabled={!formattedSql}><Download size={15} />下载</button>
-                  <button className="ghost" onClick={() => setSqlInput(SAMPLE_SQL)}>示例</button>
-                  <button className="ghost danger" onClick={() => setSqlInput('')}>清空</button>
-                </div>
+              <div className="compact-stats" aria-label="JSON 统计信息">
+                <span>{stats.size} 字符</span>
+                <span>{stats.lines} 行</span>
+                <span>{stats.nodes} 节点</span>
               </div>
-              <textarea value={sqlInput} onChange={(event) => setSqlInput(event.target.value)} spellCheck="false" />
-            </article>
+            </>
+          )}
 
-            <article className="panel output-panel">
-              <div className="panel-header">
-                <h2>格式化结果</h2>
-                <span>复用 sql-format 格式化核心</span>
+          {activeTool === 'sql' && (
+            <>
+              <section className="workspace-grid sql-workspace">
+                <article className="panel editor-panel">
+                  <div className="panel-header">
+                    <h2>输入 SQL</h2>
+                    <div className="panel-tools">
+                      <button onClick={() => setSqlInput(formattedSql)} disabled={!formattedSql}><Sparkles size={15} />格式化</button>
+                      <button onClick={copySqlResult} disabled={!formattedSql}><Clipboard size={15} />{sqlCopyText}</button>
+                      <button onClick={downloadSqlResult} disabled={!formattedSql}><Download size={15} />下载</button>
+                      <button className="ghost" onClick={() => setSqlInput(SAMPLE_SQL)}>示例</button>
+                      <button className="ghost danger" onClick={() => setSqlInput('')}>清空</button>
+                    </div>
+                  </div>
+                  <textarea value={sqlInput} onChange={(event) => setSqlInput(event.target.value)} spellCheck="false" />
+                </article>
+
+                <article className="panel output-panel">
+                  <div className="panel-header">
+                    <h2>格式化结果</h2>
+                    <span>复用 sql-format 格式化核心</span>
+                  </div>
+                  <pre className="formatted-result sql-result">{formattedSql || '请输入 SQL 后查看格式化结果。'}</pre>
+                </article>
+              </section>
+
+              <div className="compact-stats" aria-label="SQL 统计信息">
+                <span>{sqlStats.size} 字符</span>
+                <span>{sqlStats.lines} 输入行</span>
+                <span>{sqlStats.outputLines} 输出行</span>
               </div>
-              <pre className="formatted-result sql-result">{formattedSql || '请输入 SQL 后查看格式化结果。'}</pre>
-            </article>
-          </section>
+            </>
+          )}
 
-          <div className="compact-stats" aria-label="SQL 统计信息">
-            <span>{sqlStats.size} 字符</span>
-            <span>{sqlStats.lines} 输入行</span>
-            <span>{sqlStats.outputLines} 输出行</span>
-          </div>
-        </>
-      )}
+          {activeTool === 'ddl' && <DdlBuilder />}
+          {activeTool === 'alter' && <AlterBuilder />}
+          {activeTool === 'type-converter' && <TypeConverter />}
+          {activeTool === 'templates' && <TemplateLibrary />}
+        </section>
+      </div>
     </main>
   );
 }
