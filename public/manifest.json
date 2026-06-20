@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Mini Tools",
+  "description": "JSON、SQL、DDL、Diff、正则、Cron、时间转换等常用开发提效工具。",
+  "version": "1.0.0",
+  "action": {
+    "default_title": "Mini Tools",
+    "default_popup": "index.html"
+  },
+  "permissions": [],
+  "offline_enabled": true
+}
