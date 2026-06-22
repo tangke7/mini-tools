@@ -5,6 +5,8 @@
 
 import { parseQuery } from './parser';
 import type { ParsedQuery } from './parser';
+import { tokenize, TokenType } from './tokenizer';
+import type { Token } from './tokenizer';
 
 export interface FormatOptions {
   /** 关键字大小写: 'lowercase' | 'uppercase' | 'preserve' */
@@ -132,13 +134,232 @@ function formatSelect(query: ParsedQuery, options: FormatOptions): string[] {
   return lines;
 }
 
+// FROM/JOIN 类型关键字（顶层识别用）
+// 包含 from 本身，以及各种 JOIN 修饰词
+const JOIN_KEYWORDS = new Set(['from', 'join', 'left', 'right', 'inner', 'outer', 'full', 'cross']);
+
 /**
- * 格式化 FROM 子句
+ * 过滤掉空白和换行 token
+ */
+function sigTokens(tokens: Token[]): Token[] {
+  return tokens.filter(t => t.type !== TokenType.WHITESPACE && t.type !== TokenType.NEWLINE);
+}
+
+/**
+ * 将子查询 SQL 递归格式化，并在每行前加上 baseIndent 缩进
+ */
+function formatSubquery(innerSql: string, baseIndent: string, options: FormatOptions): string {
+  const formatted = formatSQL(innerSql, options);
+  return formatted
+    .split('\n')
+    .map(line => baseIndent + line)
+    .join('\n');
+}
+
+/**
+ * 将 FROM 子句的 token 列表解析为若干"片段"：
+ * 每个片段是 { prefix: string, body: Token[] }
+ * prefix 是 "from" / "join" / "left join" 等关键字组合
+ * body 是该片段的表名/子查询 token（不含 ON 条件）
+ * onTokens 是该片段的 ON 条件 token（可能为空）
+ */
+interface FromSegment {
+  prefix: string;       // "from" / "join" / "left join" 等
+  body: Token[];        // 表名或子查询 token
+  onTokens: Token[];    // ON 条件 token
+}
+
+// 真正的 JOIN 分隔关键字（不含 from，from 只在最开头出现一次）
+const JOIN_SEPARATOR_KEYWORDS = new Set(['join', 'left', 'right', 'inner', 'outer', 'full', 'cross']);
+
+function splitFromSegments(tokens: Token[], kw: (k: string, opt: FormatOptions['keywordCase']) => string, options: FormatOptions): FromSegment[] {
+  const sig = sigTokens(tokens);
+  const segments: FromSegment[] = [];
+
+  let i = 0;
+
+  while (i < sig.length) {
+    const t = sig[i];
+    const lower = t.value.toLowerCase();
+
+    // 识别 FROM/JOIN 前缀
+    if (t.type === TokenType.KEYWORD && JOIN_KEYWORDS.has(lower)) {
+      // 收集连续的 JOIN 类型关键字作为前缀
+      const parts: string[] = [];
+      while (i < sig.length && sig[i].type === TokenType.KEYWORD && JOIN_KEYWORDS.has(sig[i].value.toLowerCase())) {
+        parts.push(kw(sig[i].value, options.keywordCase));
+        i++;
+      }
+      const joinPrefix = parts.join(' ');
+
+      // 收集 body token，直到遇到顶层 ON / 下一个 JOIN 分隔关键字
+      const body: Token[] = [];
+      let depth = 0;
+      while (i < sig.length) {
+        const cur = sig[i];
+        const curLower = cur.value.toLowerCase();
+
+        if (cur.type === TokenType.LPAREN) {
+          depth++;
+          body.push(cur);
+          i++;
+        } else if (cur.type === TokenType.RPAREN) {
+          depth--;
+          body.push(cur);
+          i++;
+        } else if (depth === 0 && cur.type === TokenType.KEYWORD && (curLower === 'on' || JOIN_SEPARATOR_KEYWORDS.has(curLower))) {
+          break;
+        } else {
+          body.push(cur);
+          i++;
+        }
+      }
+
+      // 收集 ON 条件 token，直到遇到下一个顶层 JOIN 分隔关键字
+      const onTokens: Token[] = [];
+      if (i < sig.length && sig[i].type === TokenType.KEYWORD && sig[i].value.toLowerCase() === 'on') {
+        i++; // 跳过 ON
+        let depth2 = 0;
+        while (i < sig.length) {
+          const cur = sig[i];
+          const curLower = cur.value.toLowerCase();
+          if (cur.type === TokenType.LPAREN) depth2++;
+          else if (cur.type === TokenType.RPAREN) depth2--;
+
+          if (depth2 === 0 && cur.type === TokenType.KEYWORD && JOIN_SEPARATOR_KEYWORDS.has(curLower)) {
+            break;
+          }
+          onTokens.push(cur);
+          i++;
+        }
+      }
+
+      segments.push({ prefix: joinPrefix, body, onTokens });
+    } else {
+      // 不是 FROM/JOIN 关键字，跳过
+      i++;
+    }
+  }
+
+  return segments;
+}
+
+/**
+ * 将 token 列表转为文本（简单拼接，用空格分隔有意义的 token）
+ */
+function tokensToRawText(tokens: Token[]): string {
+  const sig = sigTokens(tokens);
+  if (sig.length === 0) return '';
+  let result = sig[0].value;
+  for (let i = 1; i < sig.length; i++) {
+    const prev = sig[i - 1];
+    const curr = sig[i];
+    // 括号内外不加空格
+    if (prev.type === TokenType.LPAREN || curr.type === TokenType.RPAREN) {
+      result += curr.value;
+    } else if (curr.type === TokenType.COMMA) {
+      result += curr.value;
+    } else if (prev.type === TokenType.COMMA) {
+      result += ' ' + curr.value;
+    } else if (prev.type === TokenType.DOT || curr.type === TokenType.DOT) {
+      result += curr.value;
+    } else {
+      result += ' ' + curr.value;
+    }
+  }
+  return result.trim();
+}
+
+/**
+ * 判断 token 列表是否是一个子查询（括号包裹的 SELECT）
+ * 返回括号内的 token（不含外层括号），以及别名
+ */
+function extractSubquery(tokens: Token[]): { innerTokens: Token[]; alias: string } | null {
+  const sig = sigTokens(tokens);
+  if (sig.length === 0) return null;
+
+  // 格式：( SELECT ... ) [AS] alias
+  if (sig[0].type !== TokenType.LPAREN) return null;
+
+  // 找到匹配的右括号
+  let depth = 0;
+  let closeIdx = -1;
+  for (let i = 0; i < sig.length; i++) {
+    if (sig[i].type === TokenType.LPAREN) depth++;
+    else if (sig[i].type === TokenType.RPAREN) {
+      depth--;
+      if (depth === 0) {
+        closeIdx = i;
+        break;
+      }
+    }
+  }
+  if (closeIdx < 0) return null;
+
+  const innerTokens = sig.slice(1, closeIdx);
+  // 检查括号内第一个有意义 token 是否是 SELECT
+  const firstInner = innerTokens.find(t => t.type !== TokenType.WHITESPACE && t.type !== TokenType.NEWLINE);
+  if (!firstInner || firstInner.value.toLowerCase() !== 'select') return null;
+
+  // 提取别名（括号后面的 AS alias 或直接 alias）
+  let alias = '';
+  let aliasStart = closeIdx + 1;
+  if (aliasStart < sig.length && sig[aliasStart].type === TokenType.KEYWORD && sig[aliasStart].value.toLowerCase() === 'as') {
+    aliasStart++;
+  }
+  if (aliasStart < sig.length && (sig[aliasStart].type === TokenType.IDENTIFIER || sig[aliasStart].type === TokenType.KEYWORD)) {
+    alias = sig[aliasStart].value;
+  }
+
+  return { innerTokens, alias };
+}
+
+/**
+ * 格式化 FROM 子句（支持子查询递归格式化和 JOIN 换行）
  */
 function formatFrom(query: ParsedQuery, options: FormatOptions): string[] {
   if (!query.from) return [];
   const kw = applyCase;
-  return [`${kw('from', options.keywordCase)} ${query.from.tables}`];
+  const indent = options.indent;
+
+  // 将 FROM 子句内容 tokenize
+  const rawFrom = query.from.tables;
+  const allTokens = tokenize(rawFrom);
+  const sig = sigTokens(allTokens);
+
+  // 在 sig 前面插入一个虚拟的 "from" 关键字，方便统一处理
+  const fromToken: Token = { type: TokenType.KEYWORD, value: 'from', position: -1 };
+  const fullSig = [fromToken, ...sig];
+
+  const segments = splitFromSegments(fullSig, kw, options);
+
+  const lines: string[] = [];
+
+  for (const seg of segments) {
+    const subq = extractSubquery(seg.body);
+
+    if (subq) {
+      // 子查询：递归格式化
+      const innerSql = tokensToRawText(subq.innerTokens);
+      const formattedInner = formatSubquery(innerSql, indent, options);
+      const aliasPart = subq.alias ? ` ${kw('as', options.keywordCase)} ${subq.alias}` : '';
+      lines.push(`${seg.prefix} (`);
+      lines.push(formattedInner);
+      lines.push(`)${aliasPart}`);
+    } else {
+      // 普通表名
+      const tableText = tokensToRawText(seg.body);
+      lines.push(`${seg.prefix} ${tableText}`);
+    }
+
+    // ON 条件
+    if (seg.onTokens.length > 0) {
+      const onText = tokensToRawText(seg.onTokens);
+      lines.push(`${indent}${kw('on', options.keywordCase)} ${onText}`);
+    }
+  }
+
+  return lines;
 }
 
 /**
