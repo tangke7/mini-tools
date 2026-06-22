@@ -100,6 +100,9 @@ function buildPropertyLines(properties) {
 
 function buildAlterSql(config) {
   const tableName = buildFullTableName(config);
+  const onCluster = config.tableType === 'clickhouse' && config.chUseOnCluster
+    ? ` ON CLUSTER ${normalizeIdentifier(config.chOnClusterName, 'default_cluster')}`
+    : '';
   const tableType = config.tableType;
   const operation = config.operation;
   const columns = buildColumnDefinitions(config.columns, tableType);
@@ -115,8 +118,8 @@ function buildAlterSql(config) {
   if (operation === 'addColumns') {
     if (tableType === 'clickhouse') {
       return columns.length
-        ? columns.map((column) => `ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS ${column};`).join('\n')
-        : `ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS new_col String COMMENT '新增字段';`;
+        ? columns.map((column) => `ALTER TABLE ${tableName}${onCluster} ADD COLUMN IF NOT EXISTS ${column};`).join('\n')
+        : `ALTER TABLE ${tableName}${onCluster} ADD COLUMN IF NOT EXISTS new_col String COMMENT '新增字段';`;
     }
 
     return [
@@ -129,7 +132,7 @@ function buildAlterSql(config) {
   if (operation === 'modifyColumn') {
     if (tableType === 'clickhouse') {
       const comment = config.columnComment.trim() ? ` COMMENT '${columnComment}'` : '';
-      return `ALTER TABLE ${tableName} MODIFY COLUMN ${targetColumn} ${newColumnType}${comment};`;
+      return `ALTER TABLE ${tableName}${onCluster} MODIFY COLUMN ${targetColumn} ${newColumnType}${comment};`;
     }
 
     if (tableType === 'iceberg') {
@@ -149,7 +152,7 @@ function buildAlterSql(config) {
 
   if (operation === 'dropColumn') {
     if (tableType === 'clickhouse') {
-      return `ALTER TABLE ${tableName} DROP COLUMN IF EXISTS ${targetColumn};`;
+      return `ALTER TABLE ${tableName}${onCluster} DROP COLUMN IF EXISTS ${targetColumn};`;
     }
 
     return `ALTER TABLE ${tableName} DROP COLUMN ${targetColumn};`;
@@ -157,7 +160,7 @@ function buildAlterSql(config) {
 
   if (operation === 'commentColumn') {
     if (tableType === 'clickhouse') {
-      return `ALTER TABLE ${tableName} COMMENT COLUMN ${targetColumn} '${columnComment}';`;
+      return `ALTER TABLE ${tableName}${onCluster} COMMENT COLUMN ${targetColumn} '${columnComment}';`;
     }
 
     if (tableType === 'iceberg') {
@@ -169,7 +172,7 @@ function buildAlterSql(config) {
 
   if (operation === 'commentTable') {
     if (tableType === 'clickhouse') {
-      return `ALTER TABLE ${tableName} MODIFY COMMENT '${tableComment}';`;
+      return `ALTER TABLE ${tableName}${onCluster} MODIFY COMMENT '${tableComment}';`;
     }
 
     return `ALTER TABLE ${tableName} SET TBLPROPERTIES ('comment' = '${tableComment}');`;
@@ -183,7 +186,7 @@ function buildAlterSql(config) {
 
   if (operation === 'dropPartition') {
     if (tableType === 'clickhouse') {
-      return `ALTER TABLE ${tableName} DROP PARTITION '${quoteText(clickHousePartitionSpec)}';`;
+      return `ALTER TABLE ${tableName}${onCluster} DROP PARTITION '${quoteText(clickHousePartitionSpec)}';`;
     }
 
     if (!partitionSpec) return `ALTER TABLE ${tableName} DROP IF EXISTS PARTITION (dt='20260620');`;
@@ -217,6 +220,8 @@ function AlterBuilder() {
     operation: 'addColumns',
     database: 'default',
     tableName: 'dwd_user_event_di',
+    chUseOnCluster: false,
+    chOnClusterName: 'default_cluster',
     targetColumn: 'old_col',
     newColumnName: 'new_col',
     newColumnType: 'string',
@@ -315,6 +320,18 @@ function AlterBuilder() {
                     ))}
                   </select>
                 </label>
+                {config.tableType === 'clickhouse' && (
+                  <label className="setting-check ddl-check-card ddl-field-wide">
+                    <input type="checkbox" checked={config.chUseOnCluster} onChange={(event) => setField('chUseOnCluster', event.target.checked)} />
+                    <span>使用 ON CLUSTER</span>
+                  </label>
+                )}
+                {config.tableType === 'clickhouse' && config.chUseOnCluster && (
+                  <label className="setting-field ddl-field-wide">
+                    <span>ON CLUSTER 集群名</span>
+                    <input value={config.chOnClusterName} onChange={(event) => setField('chOnClusterName', event.target.value)} placeholder="default_cluster" />
+                  </label>
+                )}
               </div>
             </section>
 
